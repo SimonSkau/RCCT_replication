@@ -1,0 +1,113 @@
+clc
+%clear all
+% close all
+
+groupID = {'Cogthyr_con_'};
+pre12 = {'_pre_1','_pre_2'};
+
+ for subType = 1;
+ for subID = 6[38:45 47:63 65];%participants    
+ for sesID = 1:2;
+
+snirf = SnirfLoad([groupID{subType} sprintf('%02d',subID) pre12{sesID} '.snirf']);%and pre_2
+
+[groupID{subType} sprintf('%02d',subID) pre12{sesID} ]
+
+procResult.mlActMan{1} = ones(size(snirf.GetMeasList,1),1);
+procResult.tInc{1}= ones(size(snirf.Get_t,1),1);
+
+mlActAuto = hmrR_PruneChannels(snirf.data, snirf.probe ,procResult.mlActMan , procResult.tInc, [1e-03  1e+0 ], 15, [0.0 40.0]);
+% mlActAuto = hmrR_PruneChannels(data, probe, mlActMan, tInc, dRange, SNRthresh, SDrange)
+
+X = zeros(96,1);
+X([22 23 24 25 29 30 31 32 70 71 72 73 77 78 79 80],1) = 1;% these are the only channels of interset
+
+for n = [22 23 24 25 29 30 31 32 70 71 72 73 77 78 79 80];
+    if mlActAuto{1}(n) == 0;
+        X(n) = 0;
+    else
+        X(n)= 1;
+    end 
+end
+
+mlActAuto{1} = X;
+
+dod = hmrR_Intensity2OD( snirf.data );
+
+
+dod2 = hmrR_BandpassFilt(dod, 0.01, 0.5);
+
+tMotion = 0.5;% Units of seconds.    Typical value ranges from 0.1 to 0.5.
+tMask = 1; %Units of seconds. Typical value ranges from 0.5 to 1
+STDEVthresh = 30;
+AMPthresh =  1;
+procResult.tIncAuto = hmrR_MotionArtifact(dod2, snirf.probe, procResult.mlActMan, mlActAuto, procResult.tInc, tMotion, tMask, STDEVthresh, AMPthresh);
+
+tRange =[-5 5];
+[procResult.stim, tRange] = hmrR_StimRejection(dod2, snirf.stim, procResult.tIncAuto, procResult.tInc, tRange);
+
+[tInc,tIncCh] = hmrR_MotionArtifactByChannel(dod2, snirf.probe, procResult.mlActMan, mlActAuto, procResult.tInc, tMotion, tMask, STDEVthresh, AMPthresh);
+
+p = 0.99;
+dod3 = hmrR_MotionCorrectSpline(dod2, procResult.mlActMan, tIncCh, p);
+%data_dod = hmrR_MotionCorrectSpline(data_dod, mlAct, tIncCh, p, turnon)
+
+X = NaN(37,2);
+XX = []; %this is age based (not shown here for anonymity) be used for ppf in hmrR_OD2Conc
+
+dc = hmrR_OD2Conc( dod3, snirf.probe, [XX(subID,:)] );
+
+% data - this is the concentration data with dimensions #time points x [HbO/HbR/HbT] x #channels
+% stim - stimulation vector (# time points x #conditions)=1 at stim onset otherwise =0
+% probe - source detector stucture (units should be consistent with rhoSD_ssThresh)
+procResult.mlActAuto = mlActAuto;
+procResult.Aaux = [];
+rcMap = [];%snirf.aux;
+trange = [-2 12]; 
+glmSolveMethod = 2;
+idxBasis = 1;
+paramsBasis = [0.5 0.5];
+rhoSD_ssThresh = 15;
+flagNuisanceRMethod = 2;
+driftOrder = 0;
+c_vector = [0];
+[yHRF_SS, dcAvgStd, nTrials, dcNew, dcResid, dcSum2, beta, R, hmrstats] = hmrR_GLM(dc, procResult.stim, snirf.probe, procResult.mlActAuto, procResult.Aaux, procResult.tIncAuto, rcMap, trange, glmSolveMethod, idxBasis, paramsBasis, rhoSD_ssThresh, flagNuisanceRMethod, driftOrder, c_vector);
+
+Result = yHRF_SS.GetDataTimeSeries('reshape');
+result = Result(1:141,:,:,:);
+%dcAvg.GetDataTimeSeries('reshape');
+
+for n = 1:48;
+    r{n} = corr([result(:,1,n,1) result(:,2,n,1) ]);
+
+
+    if         abs(r{n}(2))>0.95;
+        result(:,1,n,2) = NaN(size(result(:,1,n,2)));
+        result(:,2,n,2) = NaN(size(result(:,1,n,2)));
+        result(:,3,n,2) = NaN(size(result(:,1,n,2)));
+
+    else
+        result(:,1,n,1);
+        result(:,2,n,1);
+        result(:,3,n,1);
+    end
+end  
+
+Left_ROI = [22 23 24 25];
+Right_ROI = [29 30 31 32];
+
+all_chan_oxy_1_ipsi_L{subType}{sesID,subID} = squeeze(result(:,1,Left_ROI,1));
+all_chan_oxy_2_contra_L{subType}{sesID,subID} = squeeze(result(:,1,Left_ROI,2));
+all_chan_oxy_3_ipsi_L{subType}{sesID,subID} = squeeze(result(:,1,Left_ROI,3));
+all_chan_oxy_4_contra_L{subType}{sesID,subID} = squeeze(result(:,1,Left_ROI,4));
+
+all_chan_oxy_1_contra_R{subType}{sesID,subID} = squeeze(result(:,1,Right_ROI,1));
+all_chan_oxy_2_ipsi_R{subType}{sesID,subID} = squeeze(result(:,1,Right_ROI,2));
+all_chan_oxy_3_contra_R{subType}{sesID,subID} = squeeze(result(:,1,Right_ROI,3));
+all_chan_oxy_4_ipsi_R{subType}{sesID,subID} = squeeze(result(:,1,Right_ROI,4));
+
+
+
+end
+end
+end
